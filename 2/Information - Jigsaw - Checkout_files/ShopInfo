@@ -1,0 +1,13 @@
+shopInfoCallback({
+  "success": true,
+  "environment": "webservices.global-e.com",
+  "siteId": "7ce243a1e1a2",
+  "isTokenEnabled": "true",
+  "shopCountryCode": "GB",
+  "shopProvinceCode": "ENG",
+  "merchantId": "30000106",
+  "operatedCountries": [ "AD","AE","AG","AI","AL","AM","AO","AR","AT","AU","AW","AZ","BA","BB","BD","BE","BF","BG","BH","BI","BJ","BL","BM","BN","BO","BR","BS","BW","BZ","CA","CH","CI","CK","CL","CM","CO","CR","CV","CW","CY","CZ","DE","DJ","DK","DM","DO","DZ","EC","EE","EG","ES","ET","FI","FJ","FK","FO","FR","GA","GD","GE","GF","GH","GI","GL","GM","GN","GP","GQ","GR","GT","GW","GY","HK","HN","HR","HT","HU","ID","IE","IL","IN","IS","IT","JM","JO","JP","KE","KG","KH","KI","KM","KN","KR","KW","KY","KZ","LA","LB","LC","LI","LK","LR","LS","LT","LU","LV","MA","MC","MD","ME","MF","MG","MK","MN","MO","MQ","MS","MT","MU","MV","MW","MX","MY","MZ","NA","NC","NI","NL","NO","NP","NR","NU","NZ","OM","PA","PE","PF","PG","PH","PK","PL","PT","PY","QA","RE","RO","RS","SA","SB","SC","SD","SE","SG","SH","SI","SK","SL","SM","SR","ST","SV","SX","SZ","TC","TD","TG","TH","TL","TM","TN","TO","TR","TT","TV","TW","TZ","UG","US","UY","UZ","VA","VC","VE","VG","VN","VU","WF","WS","YT","ZA","ZM","ZW" ],
+  "paymentBoxUrl": "https://webservices.global-e.com/scripts/platforms/shopify/checkout.js",
+  "suppressNativeAmazonPay": "true",
+  "checkoutCustomerTags": ""
+})

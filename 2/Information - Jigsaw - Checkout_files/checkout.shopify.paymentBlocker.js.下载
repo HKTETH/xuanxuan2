@@ -1,0 +1,379 @@
+function ShopifyPaymentBlocker() {
+    this.IsPaymentStep = false;
+    this.IsOperatedCountry = false;
+    this.IsSilentMode = false;
+    this.ShopId = 0;
+    this.OperatedCountries = [];
+    this.envKey = 'PROD';
+    this.LogTypes = {
+        "Exception": "exception",
+        "Info": "info",
+        "Warning": "Warning"
+    }
+
+    this.glNewEnvs = {
+        QA: "https://qa.bglbesrv.com",
+        STG: "",
+        QAINT: "https://www.bglbesrv.com",
+        PROD: "https://web.glbesrv.com"
+    };
+
+    this.glChekoutEnvs = {
+        QA: "qacloudflarecdn.bglobale.com",
+        STG: "",
+        QAINT: "",
+        PROD: "webservices.global-e.com"
+    };
+
+    this.spyEnvs = {
+        QA: "https://cb-integration-qa.bglbesrv.com",
+        STG: "",
+        QAINT: "https://cb-integration-qa-int.bglbesrv.com",
+        PROD: "https://crossborder-integration.glbesrv.com"
+    };
+    this.Init();
+};
+
+ShopifyPaymentBlocker.prototype.Init = function () {
+    var self = this;
+    try {
+        self.GetEnvFromURL();
+        self.IsPaymentStep = self.CheckIsPaymentStep();
+        // Decide if we are in operateCountry
+        self.HandleIsOperatedCountry();
+
+        // Works only if we are in payment step, otherwise do nothing
+        if (self.IsPaymentStep && self.IsOperatedCountry) {
+            ShopifyPaymentBlocker.prototype.IsIntervalAlreadyRun = true;
+            ShopifyPaymentBlocker.prototype.IntervalId = setInterval(ShopifyPaymentBlocker.prototype.IsCheckoutDefined.bind(this), 500);          
+            // self.TryFetchCheckoutScript();
+        }
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call Init: " + e.message);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.IsCheckoutDefined = function () {
+    var self = this;
+    try {
+        if (self.IsDefined(GESHOP)) {
+            clearInterval(ShopifyPaymentBlocker.prototype.IntervalId);
+        }
+        else if (ShopifyPaymentBlocker.prototype.IntervalCounter > 4) {
+            self.HandleBlocker();
+            clearInterval(ShopifyPaymentBlocker.prototype.IntervalId);
+        }
+        else {
+            ShopifyPaymentBlocker.prototype.IntervalCounter++;
+        }
+    }
+    catch {
+        ShopifyPaymentBlocker.prototype.IntervalCounter++;
+        if (ShopifyPaymentBlocker.prototype.IntervalCounter > 4) {
+            self.HandleBlocker();
+            clearInterval(ShopifyPaymentBlocker.prototype.IntervalId);
+        }
+    }
+};
+
+ShopifyPaymentBlocker.prototype.CheckIsPaymentStep = function () {
+    var self = this;
+    if (self.IsDefined(Shopify)) {
+        try {
+            if (Shopify.Checkout.step == "payment_method") {
+                return true;
+            }
+            else {
+                return false;
+            }
+        }
+        catch (ex) {
+            self.Log(self.LogTypes.Exception, "CheckIsPaymentStep was failed. " + ex + ".");
+            return false;
+        }
+    }
+
+    return false;
+};
+
+ShopifyPaymentBlocker.prototype.TryFetchCheckoutScript = function () {
+    var self = this;
+    var xhr = new XMLHttpRequest();
+    try {
+        xhr.open("GET", self.glChekoutEnvs[self.envKey] + "/scripts/platforms/shopify/checkout.js", true);
+
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200) {
+                    console.log(xhr.responseText)
+                } else {
+                    console.log("Error", xhr.statusText);
+                }
+            }
+        };
+        xhr.onerror = function (e) {
+            console.log("Error Catched" + e.error);
+            self.HandleBlocker();
+        };
+
+        xhr.send();
+    }
+    catch (error) {
+        console.log("ConsoleLog \n " + JSON.stringify(xhr));
+        console.log("Error Catched" + error);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.HandleBlocker = function () {
+    var self = this;
+    try {
+        // Check if we blocked and hide Shopify Payment
+        self.CheckIsSilentMode();
+        var isHidden = self.HideShopifyPayment();
+        if (isHidden) {
+            self.ShowBlockMessageToCustomer();
+        }
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call HandleBlocker: " + e.message);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.HandleIsOperatedCountry = function () {
+    var self = this;
+    try {
+        if (self.IsDefined(Shopify) &&
+            self.IsDefined(Shopify.Checkout)) {
+            if (self.IsDefined(Shopify.Checkout.shop) &&
+                self.IsDefined(Shopify.Checkout.shop.id)) {
+                self.ShopId = Shopify.Checkout.shop.id;
+            }
+            if (self.IsDefined(Shopify.Checkout.shippingAddress) &&
+                self.IsDefined(Shopify.Checkout.shippingAddress.countryCode)) {
+                ShopifyPaymentBlocker.prototype.SelectedShippingCountry = Shopify.Checkout.shippingAddress.countryCode;
+            }
+        }
+
+        // Check if GLBE_PARAMS exists
+        if (self.IsDefined(GLBE_PARAMS)) {
+            self.IsOperatedCountry = GLBE_PARAMS.isOperatedCountry();
+            // self.SetENV(GLBE_PARAMS.environment);
+        }
+
+        // GLBE_PARAMS is not available, need to get from application the operated countries
+        else {
+            self.GetShopInfo();
+        }
+    } catch (e) {
+        self.GetShopInfo();
+    }
+};
+
+ShopifyPaymentBlocker.prototype.GetShopInfo = function () {
+    var self = this;
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", self.spyEnvs[self.envKey] + '/resources/checkout/ShopInfo?shopId=' + self.ShopId + '&v=1_0', true);
+        xhr.send();
+
+        xhr.onload = function () {
+            if (xhr.status === 200) {
+                console.log(xhr.responseText);
+                var data = xhr.response.slice(1, -1);
+                var obj = JSON.parse(data);
+                self.SetShopInfoCallback(obj);
+                if (self.IsPaymentStep && self.IsOperatedCountry && !ShopifyPaymentBlocker.prototype.IsIntervalAlreadyRun) {
+                    ShopifyPaymentBlocker.prototype.IntervalId = setInterval(ShopifyPaymentBlocker.prototype.IsCheckoutDefined.bind(self), 500);
+                }
+            } else {
+                console.log("Error", xhr.statusText);
+            }
+        };
+        xhr.onerror = function (e) {
+            console.log("Error Catched" + e.error);
+        };
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call GetShopInfo: " + e.message);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.HideShopifyPayment = function () {
+    var self = this;
+    var isHidden = false;
+    try {
+        var paymentElement = document.getElementsByClassName("section section--payment-method")[0];
+        if (self.IsDefined(paymentElement)) {
+            if (!self.IsSilentMode) {
+                var paymentHeaderSectionElement = paymentElement.getElementsByClassName("section__header")[0];
+                paymentHeaderSectionElement.style.display = 'none';
+                var paymentContentSectionElement = paymentElement.getElementsByClassName("section__content")[0];
+                paymentContentSectionElement.style.display = 'none';
+                var paymentButton = document.getElementById("continue_button");
+                paymentButton.style.display = 'none';
+                var billingSection = document.getElementsByClassName("section section--billing-address")[0];
+                billingSection.style.display = 'none';
+
+                isHidden = true;
+                self.Log(self.LogTypes.Warning, "Detected scenario of 3rd party extension that blocks GE!!! SilentMode is false");
+            }
+            else {
+                self.Log(self.LogTypes.Info, "Detected scenario of 3rd party extension that blocks GE!!! SilentMode is true");
+            }
+        }
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call HideShopifyPayment: " + e.message);
+    }
+    return isHidden;
+};
+ShopifyPaymentBlocker.prototype.ShowBlockMessageToCustomer = function () {
+    var self = this;
+    try {
+        var message = document.createElement("div");
+        // Set message style
+
+        message.style.border = "1px solid red";
+        message.style.marginBottom = "12px";
+        message.style.textAlign = "center";
+        message.style.backgroundColor = "crimson";
+        message.style.color = "#fff";
+        message.style.fontFamily = "\"helveticaneueltstdRoman\", Helvetica, Arial, \"Sans - serif\", sans-serif";
+        message.style.padding = "25px 13px 25px 13px";
+        message.style.borderRadius = "5px";
+        message.style.lineHeight = "20px";
+
+        var paymentElement = document.getElementsByClassName("section section--payment-method")[0];
+        if (self.IsDefined(paymentElement)) {
+            message.innerHTML = "<b style=\"font-weight: bold;\">It looks like something in your browser is blocking our checkout.</b> If you're using an ad-blocking browser extension, please add <b style=\"font-weight: bold;\">Global-e.com</b> to the list of allowed sites. <br><br>If this doesn't help, please contact us and we'll be happy to assist you.</div>";
+            paymentElement.appendChild(message);
+            paymentElement.classList.remove("section--payment-method");
+        }
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call ShowBlockMessageToCustomer: " + e.message);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.IsDefined = function (object) {
+    try {
+        if (typeof object != "undefined" && object != "" && object != null)
+            return true;
+        else
+            return false;
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call IsDefined: " + e.message);
+        return false;
+    }
+};
+
+ShopifyPaymentBlocker.prototype.LoadScript = function (src, onload) {
+    try {
+        var head = document.getElementsByTagName('head')[0];
+        var script = document.createElement('script');
+        script.type = 'text/javascript';
+
+        if (typeof onload != "undefined") {
+            script.onload = onload;
+        }
+        script.src = src;
+        head.appendChild(script);
+    } catch (e) {
+        console.log("Error when call LoadScript: " + e.message + " " + src);
+        self.Log(self.LogTypes.Exception, "Error when call LoadScript: " + e.message + " " + src);
+    }
+};
+
+
+ShopifyPaymentBlocker.prototype.Log = function (logType, message) {
+    var self = this;
+    try {
+
+        var messagePrefix = "SPYPAYBLOCKER> ";
+        var args = [];
+        if (arguments.length > 2) {
+            args += Array.prototype.slice.call(arguments, 2).map(a => '&arg=' + encodeURIComponent(a)).join('');
+        }
+
+        var messageContext = " | ( CountryCode = {CountryCode}, ShopId = {ShopId}, CheckoutStep = {CheckoutStep}, IsOperatedCountry = {IsOperatedCountry}) |";
+        args += [ShopifyPaymentBlocker.prototype.SelectedShippingCountry, self.ShopId, Shopify.Checkout.step, self.IsOperatedCountry].map(a => '&arg=' + a).join('');
+
+        if (logType == self.LogTypes.Exception) {
+            console.log(message);
+        }
+
+        var src = self.glNewEnvs[self.envKey] + '/platforms/shopify/checkout/log/' + logType + '?message=' + encodeURIComponent(messagePrefix + message + messageContext) + args;
+
+        self.LoadScript(src);
+
+    }
+    catch (err) {
+        console.log(err);
+    }
+}
+
+ShopifyPaymentBlocker.prototype.CheckIsSilentMode = function () {
+    var self = this;
+    try {
+        var scriptUrl = self.getScriptURL();
+        var querystring = scriptUrl.substring(scriptUrl.indexOf("?"));
+        var params = new Proxy(new URLSearchParams(querystring), {
+            get: (searchParams, prop) => searchParams.get(prop),
+        });
+        self.IsSilentMode = Boolean(params.silent_mode);
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call CheckIsSilentMode: " + e.message);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.GetEnvFromURL = function () {
+    var self = this;
+    try {
+        var scriptUrl = self.getScriptURL();
+        var querystring = scriptUrl.substring(scriptUrl.indexOf("?"));
+        var params = new Proxy(new URLSearchParams(querystring), {
+            get: (searchParams, prop) => searchParams.get(prop),
+        });
+        self.envKey = params.env;
+    } catch (e) {
+        self.envKey = 'PROD';
+        self.Log(self.LogTypes.Exception, "Error when call GetEnvFromURL: " + e.message);
+    }
+};
+
+ShopifyPaymentBlocker.prototype.getScriptURL = function () {
+    var script = document.currentScript || document.querySelector('script[src*="checkout.shopify.paymentBlocker.js"]')
+    return script.src
+}
+
+// Return first key in the provided object or undefined if not exist
+ShopifyPaymentBlocker.prototype.GetKeyByValue = function (object, value) {
+    var self = this;
+    var defaultEnv = 'PROD';
+    try {
+        return Object.keys(object).find(key => object[key] === value);
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call GetKeyByValue: " + e.message);
+        return defaultEnv;
+    }
+}
+
+ShopifyPaymentBlocker.prototype.SetShopInfoCallback = function (shopInfo) {
+    var self = this;
+    try {
+        if (shopInfo.success) {
+            self.OperatedCountries = shopInfo.operatedCountries;
+            if (self.OperatedCountries.includes(ShopifyPaymentBlocker.prototype.SelectedShippingCountry)) {
+                self.IsOperatedCountry = true;
+            }
+
+            // self.SetENV(shopInfo.environment);
+        }
+    } catch (e) {
+        self.Log(self.LogTypes.Exception, "Error when call SetShopInfoCallback: " + e.message);
+    }
+
+};
+
+ShopifyPaymentBlocker.prototype.IntervalId = null;
+ShopifyPaymentBlocker.prototype.IntervalCounter = 0;
+ShopifyPaymentBlocker.prototype.SelectedShippingCountry = '';
+ShopifyPaymentBlocker.prototype.IsIntervalAlreadyRun = false;
+
+var GESHOPPAYMENTBLOCKER = new ShopifyPaymentBlocker();
