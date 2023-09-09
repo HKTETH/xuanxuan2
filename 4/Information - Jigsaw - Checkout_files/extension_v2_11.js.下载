@@ -1,0 +1,386 @@
+/*Do not modify. Create new version instead. 
+In order to refresh cache use CDN refresh by URL. 
+More details in SPY-570*/
+function GlobaleApp() {
+    this.init();
+};
+
+GlobaleApp.prototype = (function () {
+    var self = this;
+
+    var parametersInitialized = function (isB2B) {
+        if (!isB2B) {
+            var appCssUrl = GLBE_PARAMS.integrationAppUrl + "resources/css/" + GLBE_PARAMS.merchantId + "/" + GLBE_PARAMS.shippingCountry;
+            if (!self.utils.isLinkAdded(appCssUrl)) { //can be already added by checkout.liquid
+                var cssElement = document.createElement('link');
+                cssElement.rel = "stylesheet";
+                cssElement.type = "text/css"
+                cssElement.href = appCssUrl;
+                document.getElementsByTagName('head')[0].appendChild(cssElement);
+            }
+
+            var coreCssUrl = "https://" + GLBE_PARAMS.environment + "/platforms/shopify/checkout/styles/" + GLBE_PARAMS.merchantId + "/" + GLBE_PARAMS.shippingCountry;
+            if (!self.utils.isLinkAdded(coreCssUrl)) { //can be already added by checkout.liquid
+                var cssElement = document.createElement('link');
+                cssElement.rel = "stylesheet";
+                cssElement.type = "text/css"
+                cssElement.href = coreCssUrl;
+                document.getElementsByTagName('head')[0].appendChild(cssElement);
+            }
+        }
+
+        if (GLBE_PARAMS.isOperatedCountry()) {
+            if (GLBE_PARAMS.paymentBoxUrl && !self.utils.isScriptAdded(GLBE_PARAMS.paymentBoxUrl)) { //can be already added by checkout.liquid
+                var s = document.createElement('script');
+                s.type = 'text/javascript';
+                s.async = true;
+                s.src = GLBE_PARAMS.paymentBoxUrl;
+                document.getElementsByTagName('head')[0].appendChild(s);
+            }
+
+            handleAmazonPayLogout();
+        } else {
+            const targetNode = document.querySelector(".order-summary__sections");
+
+            if (targetNode != null) {
+                // Options for the observer (which mutations to observe)
+                const config = { attributes: true, childList: true, subtree: true };
+
+                // Callback function to execute when mutations are observed
+                const callback = function (mutationsList, observer) {
+                    // Use traditional "for loops" for IE 11
+                    for (var mutation of mutationsList) {
+                        if (mutation.type === "childList") {
+                            if (isGEPaymentGatewayVisible()) {
+                                hideGePaymentGateway();
+                            }
+                        }
+
+                    }
+                };
+
+                // Create an observer instance linked to the callback function
+                const observer = new MutationObserver(callback);
+
+                // Start observing the target node for configured mutations
+                observer.observe(targetNode, config);
+            }
+
+            function hideGePaymentGateway() {
+                var gatewayClicked = false;
+                //* Do one cycle through to check for any pre-clicked gateways.
+                document.querySelectorAll("[data-gateway-group]").forEach((row) => {
+                    var radioLabel = row.querySelector(".radio__label__primary").innerText.toLowerCase().trim();
+                    //* If the label starts with global-e then make sure it is hidden.
+                    if (radioLabel.indexOf("global-e") == 0 || radioLabel.includes("global-e")) {
+                        row.style.display = "none";
+                        row.nextElementSibling.style.display = "none";
+                    } else {
+                        //* If it isn't the Global-e payment gateway, validate if any are already selected. Example: Paypal Express.
+                        if (row.querySelector("input[type=radio]").checked){ gatewayClicked = true; }
+                    }
+                });
+                //* Do a second cycle to make sure that at least the Credit Card payment gateway is clicked in case "Global-e Payments" remained selected after being hidden.
+                document.querySelectorAll("[data-gateway-group]").forEach((row) => {
+                    if (!gatewayClicked) {
+                        row.querySelector("input[type=radio]").click();
+                        gatewayClicked = true;
+                    }
+                });
+            }
+
+            function isGEPaymentGatewayVisible() {
+                var visible = false;
+                document.querySelectorAll("[data-gateway-group]").forEach((row) => {
+                    if (row.querySelector(".radio__label__primary").innerText.toLowerCase().indexOf("global-e") == 0) {
+                        if (row.style.display != "none")
+                            visible = true;
+                    }
+                });
+                return visible;
+            }
+
+            hideGePaymentGateway();
+
+            setInterval(function () {
+                if (isGEPaymentGatewayVisible()) {
+                    hideGePaymentGateway();
+                }
+            }, 1000);
+        }
+
+        setGEActive();
+        handleReplacement();
+    };
+
+    var handleReplacement = function () {
+        //* Polyfills
+        if (!Array.prototype.map) {
+            Array.prototype.map = function (callback) {
+                var arr = [];
+                for (var i = 0; i < this.length; i++) {
+                    arr.push(callback(this[i], i, this)) // pushing currentValue, index, array
+                }
+                return arr;
+            }
+        }
+        if (!Array.prototype.reduce) {
+            Array.prototype.reduce = function (callback, initialValue) {
+                var accumulator = initialValue === undefined ? undefined : initialValue
+                for (var i = 0; i < this.length; i++) {
+                    if (accumulator !== undefined) {
+                        accumulator = callback.call(undefined, accumulator, this[i], i, this)
+                    } else {
+                        accumulator = this[i]
+                    }
+                }
+                return accumulator;
+            }
+        }
+        //* Helper Function
+        function getParameterByName(name, url = window.location.href) {
+            name = name.replace(/[\[\]]/g, '\\$&');
+            var regex = new RegExp('[?&]' + name + '(=([^&#]*)|&|#|$)'), results = regex.exec(url);
+            if (!results) return null;
+            if (!results[2]) return '';
+            return decodeURIComponent(results[2].replace(/\+/g, ' '));
+        }
+
+        function getCookie(key) {
+            var arr = document.cookie.split(';').map(function (x) { return x.trim().split('='); }).reduce(function (a, b) { a[b[0]] = b[1]; return a; }, {});
+            return arr[key];
+        }
+
+        const GE_Replacement_Cookie = getCookie('GE_Replacement');
+        if (GE_Replacement_Cookie && GE_Replacement_Cookie.length > 0 && GE_Replacement_Cookie != null) {
+            const GE_Replacement = JSON.parse(decodeURIComponent(GE_Replacement_Cookie));
+            const replacementURL = GLBE_PARAMS.integrationAppUrl + 'api/v1.0/Checkout/StartReplacement?shop=' + GLBE_PARAMS.shop
+                + '&checkoutToken=' + GLBE_PARAMS.checkoutId
+                + '&cartToken=' + getCookie('cart')
+                + '&countryCode=' + GE_Replacement.glCountry
+                + '&currencyCode=' + GE_Replacement.glCurrency;
+
+            //* URL Paramater : &startReplacement is true then the page will start the replacement flow as if the user hit the button.
+            const startReplacementParam = getParameterByName('startReplacement');
+            if (startReplacementParam == 'true') { doReplacement(); return; }
+
+            function replacementButtonClicked() {
+                if (GE_Replacement.glCurrency === Shopify.Checkout.currency) {
+                    doReplacement();
+                } else {
+                    //* If the replacement currency doesn't match the current Shopify checkout currency, trigger a localization change the same way the GlobaleApp does it.
+                    function formPost() {
+                        const form = document.createElement('form'); form.method = 'post'; form.action = '/localization';
+                        const params = { form_type: 'localization', _method: 'put', return_to: document.location.pathname + '?startReplacement=true', country_code: GE_Replacement.glCountry, currency_code: GE_Replacement.glCurrency }
+                        for (var key in params) { if (params.hasOwnProperty(key)) { var hiddenField = document.createElement('input'); hiddenField.type = 'hidden'; hiddenField.name = key; hiddenField.value = params[key]; form.appendChild(hiddenField); } }
+                        document.body.appendChild(form);
+                        form.submit();
+                    }
+                    formPost();
+                }
+            };
+
+            function doReplacement() {
+                window.location.href = replacementURL;
+            }
+
+            //* Place the 'Replacement Checkout' button in the top right corner of the page.
+            const replacementButtonContainerDiv = document.createElement('div'); replacementButtonContainerDiv.id = 'replacementButtonContainerDiv'; replacementButtonContainerDiv.style.display = 'flex'; replacementButtonContainerDiv.style.justifyContent = 'end';
+            const replacementButton = document.createElement('button'); replacementButton.type = 'button'; replacementButton.innerHTML = 'Replacement Checkout'; replacementButton.style.backgroundColor = '#e7e7e7'; replacementButton.style.color = 'black'; replacementButton.style.border = 'none'; replacementButton.style.padding = '15px 32px'; replacementButton.style.textAlign = 'center'; replacementButton.style.textDecoration = 'none'; replacementButton.style.display = 'inline-block'; replacementButton.style.fontSize = '16px';
+            replacementButton.addEventListener('click', replacementButtonClicked);
+            document.body.insertBefore(replacementButtonContainerDiv, document.body.firstChild);
+            replacementButtonContainerDiv.appendChild(replacementButton);
+        }
+        //* For testing purposes you can add the necessary parameters to any URL.
+        //* google.com/?glCountry=UA&glCurrency=UAH&fullRedirect=True&replacementExpire=1663066810462
+    };
+
+    var handleAmazonPayLogout = function () {
+        //* is Country Operated by Global-e?
+        if (GLBE_PARAMS.isOperatedCountry() && GLBE_PARAMS.suppressNativeAmazonPay) {
+            //console.log('GLBE - In a Global-e operated country. Running handleAmazonPayLogout()')
+            var glbeAmazonPayLogOutAttempted = document.cookie.indexOf('glbe-amazon-pay') > -1;
+            //* is Amazon Pay logged in?
+            var amazonPayIsEnabled = document.cookie.indexOf('amazon_Login_accessToken') > -1;
+            if (amazonPayIsEnabled && !glbeAmazonPayLogOutAttempted) {
+                console.warn('Amazon Pay can not be used in this country. Proceeding to /amazon_payments/logout')
+                document.cookie = 'glbe-amazon-pay=Log out attempted; max-age=30; SameSite=None; Secure;'
+                document.cookie = 'amazon_Login_accessToken=;max-age=1'
+                document.cookie = 'amazon_Login_state_cache=;max-age=1'
+                var amazonLogoutURL = 'https://' + window.location.hostname + window.location.pathname + '/amazon_payments/logout'
+                alert('Shipping to this country is not supported by Amazon Pay.')
+                window.location.assign(amazonLogoutURL);
+            }
+        }
+    };
+
+    var setGEActive = function(){
+        /* Wait for the DOM to completely loads */
+        function DOMready(callback) {
+            if (document.readyState != 'loading') callback();
+            else document.addEventListener('DOMContentLoaded', callback);
+        }
+
+        /* Check if the GLBE_PARAMS object exists, then check if country is on the operated countries array */ /* if on operated country, get the body element and add an attribute to it called "ge-active" with the value true otherwise false */
+        DOMready(function () {
+            var b = document.querySelector("body");
+            b.setAttribute("ge-active", GLBE_PARAMS.isOperatedCountry());
+        });
+    };
+
+    return {
+        constructor: GlobaleApp,
+        init: function () {
+            self = this;
+
+            //check if script from checkout liquid added to the page.
+            if (typeof GLBE_PARAMS != "undefined") {
+                parametersInitialized();
+                return;
+            }
+
+            if (!(Shopify.Checkout.shop)) {
+                return; // JS variables are not enabled by Shopify.
+            }
+
+            var shippingCountryCode = null, billingCountryCode = null, shippingStateCode = null;
+
+            if (Shopify.Checkout.shippingAddress && Shopify.Checkout.shippingAddress.countryCode) {
+                shippingCountryCode = Shopify.Checkout.shippingAddress.countryCode;
+                shippingStateCode = Shopify.Checkout.shippingAddress.provinceCode;
+            } else if (Shopify.Checkout.billingAddress && Shopify.Checkout.billingAddress.countryCode) {
+                shippingCountryCode = Shopify.Checkout.billingAddress.countryCode;
+                shippingStateCode = Shopify.Checkout.billingAddress.provinceCode;
+            }
+
+            if (!shippingStateCode)
+                shippingStateCode = "";
+
+            if (Shopify.Checkout.billingAddress && Shopify.Checkout.billingAddress.countryCode)
+                billingCountryCode = Shopify.Checkout.billingAddress.countryCode;
+            else if (Shopify.Checkout.shippingAddress && Shopify.Checkout.shippingAddress.countryCode)
+                billingCountryCode = Shopify.Checkout.shippingAddress.countryCode;
+
+            GLBE_PARAMS = {
+                billingCountry: billingCountryCode,
+                shippingCountry: shippingCountryCode,
+                shippingStateCode: shippingStateCode,
+                shop: Shopify.Checkout.apiHost,
+                culture: Shopify.Checkout.locale,
+                checkoutId: Shopify.Checkout.token,
+                amount: Shopify.Checkout.totalPrice * 100,
+                integrationAppUrl: "https://crossborder-integration.global-e.com/"
+            };
+
+            self.utils.getScript(GLBE_PARAMS.integrationAppUrl + "resources/checkout/ShopInfo?shopId=" + Shopify.Checkout.shop.id + "&v=1_0", {
+                jsonp: "jsoncallback",
+                jsonpFunction: "shopInfoCallback",
+                contentType: "application/json"
+            }).then(function (data) {
+                if (!data.success)
+                    return;
+
+                GLBE_PARAMS.environment = data.environment;
+                GLBE_PARAMS.siteId = data.siteId;
+                GLBE_PARAMS.isTokenEnabled = data.isTokenEnabled;
+                GLBE_PARAMS.merchantId = data.merchantId;
+                GLBE_PARAMS.operatedCountries = data.operatedCountries;
+
+                var isB2B = false;
+                if (typeof GE != "undefined" && GE) {
+                    if (typeof GE.checkoutCustomerTags != "undefined" && GE.checkoutCustomerTags && data.checkoutCustomerTags) {
+                        var tags = data.checkoutCustomerTags.split(",").map(function (el) {
+                            return el.trim().toLowerCase();
+                        });
+
+                        isB2B = GE.checkoutCustomerTags.some(function (el) {
+                            return tags.includes(el);
+                        });
+
+                        if (isB2B) {
+                            GLBE_PARAMS.operatedCountries = [];
+                        }
+                    }
+                }
+
+                GLBE_PARAMS.suppressNativeAmazonPay = data.suppressNativeAmazonPay;
+                GLBE_PARAMS.paymentBoxUrl = data.paymentBoxUrl;
+
+                function isOperatedCountryFunction() {
+                    return GLBE_PARAMS.operatedCountries.indexOf(GLBE_PARAMS.shippingCountry) > -1;
+                }
+                GLBE_PARAMS.isOperatedCountry = isOperatedCountryFunction;
+
+                if (!GLBE_PARAMS.shippingCountry) {
+                    GLBE_PARAMS.shippingCountry = data.shopCountryCode;
+
+                    if (!GLBE_PARAMS.shippingStateCode)
+                        GLBE_PARAMS.shippingStateCode = data.shopProvinceCode;
+                }
+
+                if (!GLBE_PARAMS.billingCountry)
+                    GLBE_PARAMS.billingCountry = data.shopCountryCode;
+
+                parametersInitialized(isB2B);
+            });
+        },
+        utils: {
+            isScriptAdded: function (search) {
+                var scripts = document.getElementsByTagName('script');
+                for (var i = scripts.length; i--;) {
+                    if (scripts[i].src.indexOf(search) > -1) return true;
+                }
+                return false;
+            },
+            isLinkAdded: function (search) {
+                var items = document.getElementsByTagName('link');
+                for (var i = items.length; i--;) {
+                    if (items[i].href.indexOf(search) > -1) return true;
+                }
+                return false;
+            },
+            getScript: function (url, opts) {
+                return new Promise(function (res, rej) {
+                    if (opts) {
+                        if (opts.uriParams) {
+                            for (var p in opts.uriParams) {
+                                if (opts.uriParams.hasOwnProperty(p)) {
+                                    url += (url.indexOf('?') > -1 ? '&' : '?') + p + '=' + encodeURIComponent(opts.uriParams[p]);
+                                }
+                            }
+                        }
+
+                        if (opts.cache === false) {
+                            url += (url.indexOf('?') > -1 ? '&_=' : '?_=') + (new Date()).getTime();
+                        }
+                    }
+
+                    var s = document.createElement('script');
+                    s.type = 'text/javascript';
+                    s.async = true;
+
+                    if (opts && opts.jsonp) {
+                        var jsonp = 'jsonp_' + (new Date()).getTime();
+                        if (opts.jsonpFunction)
+                            jsonp = opts.jsonpFunction;
+
+                        url += (url.indexOf('?') > -1 ? '&' : '?') + opts.jsonp + '=' + jsonp;
+                        window[jsonp] = function (data) {
+                            res(data);
+                        }
+                    }
+                    else {
+                        s.onload = function () {
+                            res();
+                        }
+                    }
+
+                    s.src = url;
+                    document.getElementsByTagName('head')[0].appendChild(s);
+                });
+            },
+        }
+    };
+})();
+
+glbeApp = new GlobaleApp();
